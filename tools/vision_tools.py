@@ -510,11 +510,25 @@ def _build_native_vision_tool_result(
     if isinstance(question, str) and question.strip():
         text_part += f"\n\nQuestion: {question.strip()}"
 
-    summary = (
-        f"Image attached natively for the main model "
-        f"({image_size_bytes / 1024:.1f} KB). "
-        "Answer using built-in vision."
-    )
+    # The text part exists for two reasons: (1) it gives the model an
+    # instruction to act on now that the pixels are in context, and
+    # (2) providers that don't support multimodal tool results can fall back
+    # to ``text_summary``.
+    # Build the summary only when a question is provided.
+    # When the question is empty we suppress the placeholder text and
+    # expose a flag (`placeholder_summary_suppressed`) that downstream
+    # adapters can use to avoid sending any default “Image attached…”
+    # message to the user.
+    if isinstance(question, str) and question.strip():
+        summary = (
+            f"Image attached natively for the main model "
+            f"({image_size_bytes / 1024:.1f} KB). "
+            "Answer using built-in vision."
+        )
+        placeholder_suppressed = False
+    else:
+        summary = ""
+        placeholder_suppressed = True
 
     return {
         "_multimodal": True,
@@ -527,6 +541,7 @@ def _build_native_vision_tool_result(
             "image_url": image_url[:200],
             "size_bytes": image_size_bytes,
             "native_vision": True,
+            "placeholder_summary_suppressed": placeholder_suppressed,
         },
     }
 
