@@ -180,6 +180,46 @@ def test_list_authenticated_providers_uses_live_models_for_user_provider(monkeyp
     assert user_prov["total_models"] == 2
 
 
+def test_list_authenticated_providers_uses_full_nvidia_catalog(monkeypatch):
+    """NVIDIA should not be sliced after the catalog merge.
+
+    Regression: even if the NVIDIA catalog is larger than the old curated
+    subset, the picker must keep every merged item so the inline selector can
+    page through the full list.
+    """
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvidia-key")
+
+    providers = list_authenticated_providers(
+        current_provider="nvidia",
+        user_providers={},
+        custom_providers=[],
+        max_models=1,
+    )
+
+    nvidia = next((p for p in providers if p.get("slug") == "nvidia"), None)
+
+    assert nvidia is not None
+    assert nvidia["total_models"] == len(nvidia["models"])
+    assert nvidia["total_models"] >= 100
+
+
+def test_merge_nvidia_catalog_unions_live_and_models_dev():
+    """The NVIDIA merge helper should union live discovery + models.dev.
+
+    This is the key fix for the selector: live NVIDIA discovery is incomplete,
+    but models.dev still has additional canonical IDs that users expect to see.
+    """
+    from hermes_cli.models import _merge_nvidia_catalog
+
+    merged = _merge_nvidia_catalog([
+        "nvidia/model-a",
+        "nvidia/model-b",
+    ])
+
+    assert merged[:2] == ["nvidia/model-a", "nvidia/model-b"]
+    assert len(merged) > 2
+
+
 def test_list_authenticated_providers_dict_models_without_default_model(monkeypatch):
     """Dict-format ``models:`` without a ``default_model`` must still expose
     every dict key, not collapse to an empty list."""

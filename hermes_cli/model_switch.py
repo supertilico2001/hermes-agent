@@ -1052,19 +1052,23 @@ def list_authenticated_providers(
     max_models: int = 8,
     current_model: str = "",
 ) -> List[dict]:
-    """Detect which providers have credentials and list their curated models.
+    """Detect which providers have credentials and list their models.
 
     Uses the curated model lists from hermes_cli/models.py (OPENROUTER_MODELS,
-    _PROVIDER_MODELS) — NOT the full models.dev catalog.  These are hand-picked
-    agentic models that work well as agent backends.
+    _PROVIDER_MODELS) for most providers — these are hand-picked agentic models
+    that work well as agent backends.
+
+    NVIDIA is the explicit exception: when available, its picker entry is fed by
+    the live /models catalog so the selector can expose the full NIM inventory
+    instead of the small curated subset.
 
     Returns a list of dicts, each with:
       - slug: str — the --provider value to use
       - name: str — display name
       - is_current: bool
       - is_user_defined: bool
-      - models: list[str] — curated model IDs (up to max_models)
-      - total_models: int — total curated count
+      - models: list[str] — model IDs (up to max_models for most providers)
+      - total_models: int — total count in the chosen catalog
       - source: str — "built-in", "models.dev", "user-config"
 
     Only includes providers that have API keys set or are user-defined endpoints.
@@ -1244,10 +1248,14 @@ def list_authenticated_providers(
         # catalog so newly released models (e.g. mimo-v2.5-pro on opencode-go)
         # show up in the picker without requiring a Hermes release.
         model_ids = curated.get(hermes_id, [])
-        if hermes_id in _MODELS_DEV_PREFERRED:
+        if hermes_id == "nvidia":
+            live_ids = provider_model_ids(hermes_id)
+            if live_ids:
+                model_ids = live_ids
+        elif hermes_id in _MODELS_DEV_PREFERRED:
             model_ids = _merge_with_models_dev(hermes_id, model_ids)
         total = len(model_ids)
-        top = model_ids[:max_models]
+        top = model_ids if hermes_id == "nvidia" else model_ids[:max_models]
 
         slug = hermes_id
         pinfo = _mdev_pinfo(mdev_id)

@@ -38,6 +38,7 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     ("moonshotai/kimi-k2.6",                   "recommended"),
     ("openrouter/pareto-code",                 "auto-routes to cheapest coder meeting openrouter.min_coding_score"),
     ("qwen/qwen3.6-plus",                      ""),
+    ("inclusionai/ring-2.6-1t:free",           "free"),
     ("anthropic/claude-haiku-4.5",             ""),
     ("openai/gpt-5.5",                         ""),
     ("openai/gpt-5.5-pro",                     ""),
@@ -51,7 +52,9 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     ("google/gemini-3.1-pro-preview",          ""),
     ("google/gemini-3.1-flash-lite-preview",   ""),
     ("qwen/qwen3.6-35b-a3b",                   ""),
-    ("stepfun/step-3.5-flash",                 ""),
+    ("inclusionai/ring-2.6-1t:free",           "free"),
+    ("stepfun/step-3.7-flash",                 ""),
+    ("poolside/laguna-m.1:free",               "free"),
     ("minimax/minimax-m2.7",                   ""),
     ("z-ai/glm-5.1",                           ""),
     ("x-ai/grok-4.20",                         ""),
@@ -63,7 +66,7 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     ("openrouter/owl-alpha",                   "free"),
     ("tencent/hy3-preview:free",               "free"),
     ("nvidia/nemotron-3-super-120b-a12b:free", "free"),
-    ("inclusionai/ring-2.6-1t:free",           "free"),
+    ("nvidia/nemotron-3-ultra-550b-a55b:free", "free"),
 ]
 
 _openrouter_catalog_cache: list[tuple[str, str]] | None = None
@@ -1115,6 +1118,20 @@ def _openrouter_model_supports_tools(item: Any) -> bool:
     return "tools" in params
 
 
+def _openrouter_live_id_candidates(preferred_id: str) -> list[str]:
+    """Return live-catalog IDs that may correspond to a curated preferred ID.
+
+    OpenRouter has historically mixed explicit ``:free`` suffixed IDs in curated
+    snapshots with bare live IDs in ``/v1/models``. When the live catalog only
+    exposes the bare ID, we still want the picker to surface that model instead
+    of dropping it entirely.
+    """
+    candidates = [preferred_id]
+    if preferred_id.endswith(":free"):
+        candidates.append(preferred_id[:-5])
+    return candidates
+
+
 def fetch_openrouter_models(
     timeout: float = 8.0,
     *,
@@ -1162,9 +1179,16 @@ def fetch_openrouter_models(
         live_by_id[mid] = item
 
     curated: list[tuple[str, str]] = []
+    seen_ids: set[str] = set()
     for preferred_id in preferred_ids:
-        live_item = live_by_id.get(preferred_id)
-        if live_item is None:
+        live_item = None
+        live_id = preferred_id
+        for candidate_id in _openrouter_live_id_candidates(preferred_id):
+            live_item = live_by_id.get(candidate_id)
+            if live_item is not None:
+                live_id = candidate_id
+                break
+        if live_item is None or live_id in seen_ids:
             continue
         # Hide models that don't advertise tool-calling support — hermes-agent
         # requires it and surfacing them leads to immediate runtime failures
@@ -1172,10 +1196,18 @@ def fetch_openrouter_models(
         if not _openrouter_model_supports_tools(live_item):
             continue
         desc = "free" if _openrouter_model_is_free(live_item.get("pricing")) else ""
-        curated.append((preferred_id, desc))
+        curated.append((live_id, desc))
+        seen_ids.add(live_id)
 
     if not curated:
         return list(_openrouter_catalog_cache or fallback)
+
+    # Keep Ring 2.6 visible in the interactive picker even when the provider
+    # menu truncates to ``max_models`` (currently 8 in most callers).
+    ring_id = "inclusionai/ring-2.6-1t"
+    ring_idx = next((i for i, (mid, _) in enumerate(curated) if mid == ring_id), None)
+    if ring_idx not in (None, 0):
+        curated.insert(1, curated.pop(ring_idx))
 
     first_id, _ = curated[0]
     curated[0] = (first_id, "recommended")
@@ -2154,6 +2186,42 @@ def _merge_with_models_dev(provider: str, curated: list[str]) -> list[str]:
     return merged
 
 
+def _merge_nvidia_catalog(catalog: list[str]) -> list[str]:
+    """Merge NVIDIA live discovery with the raw models.dev inventory.
+
+    NVIDIA is the one provider where we intentionally want the full NIM
+    catalog in the picker, not only the curated agentic subset.  Live
+    discovery returns the account-visible catalog; models.dev contributes
+    additional canonical model IDs that are not always returned live.
+    """
+    try:
+        from agent.models_dev import fetch_models_dev
+
+        data = fetch_models_dev()
+        pdata = data.get("nvidia") if isinstance(data, dict) else None
+        models = pdata.get("models") if isinstance(pdata, dict) else None
+        dev_ids = [mid for mid in models.keys() if isinstance(mid, str)] if isinstance(models, dict) else []
+    except Exception:
+        dev_ids = []
+
+    curated = list(_PROVIDER_MODELS.get("nvidia", []))
+    if not dev_ids:
+        # Still append curated-only items to keep backwards compatibility if
+        # the cache is empty or models.dev is unavailable.
+        dev_ids = curated
+
+    seen_lower: set[str] = set()
+    merged: list[str] = []
+    for source in (catalog, dev_ids, curated):
+        for mid in source:
+            key = str(mid).lower()
+            if key in seen_lower:
+                continue
+            seen_lower.add(key)
+            merged.append(mid)
+    return merged
+
+
 def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) -> list[str]:
     """Return the best known model catalog for a provider.
 
@@ -2295,17 +2363,25 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
                 api_key, base_url = "", _p.base_url
             if not base_url:
                 base_url = _p.base_url
+            live = None
             if api_key:
                 live = _p.fetch_models(api_key=api_key)
-                if live:
-                    return live
+            if live:
+                if normalized == "nvidia":
+                    return _merge_nvidia_catalog(live)
+                return live
             # Use profile's fallback_models if defined
             if _p.fallback_models:
-                return list(_p.fallback_models)
+                fallback = list(_p.fallback_models)
+                if normalized == "nvidia":
+                    return _merge_nvidia_catalog(fallback)
+                return fallback
     except Exception:
         pass
 
     curated_static = list(_PROVIDER_MODELS.get(normalized, []))
+    if normalized == "nvidia":
+        return _merge_nvidia_catalog(curated_static)
     if normalized in _MODELS_DEV_PREFERRED:
         return _merge_with_models_dev(normalized, curated_static)
     return curated_static

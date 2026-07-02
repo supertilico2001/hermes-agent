@@ -61,6 +61,101 @@ class TestOpenRouterModels:
 
 
 class TestFetchOpenRouterModels:
+    def test_live_fetch_resolves_free_aliases_to_bare_ids(self, monkeypatch):
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return (
+                    b'{"data":['
+                    b'{"id":"inclusionai/ring-2.6-1t","pricing":{"prompt":"0.000000075","completion":"0.000000625"},'
+                    b'"supported_parameters":["temperature","tools","tool_choice"]},'
+                    b'{"id":"nvidia/nemotron-3-super-120b-a12b","pricing":{"prompt":"0","completion":"0"},'
+                    b'"supported_parameters":["tools"]}'
+                    b']}'
+                )
+
+        monkeypatch.setattr(
+            _models_mod,
+            "OPENROUTER_MODELS",
+            [
+                ("inclusionai/ring-2.6-1t:free", "free"),
+                ("nvidia/nemotron-3-super-120b-a12b:free", "free"),
+            ],
+        )
+        monkeypatch.setattr(_models_mod, "_openrouter_catalog_cache", None)
+        with patch("hermes_cli.models.urllib.request.urlopen", return_value=_Resp()):
+            models = fetch_openrouter_models(force_refresh=True)
+
+        assert models == [
+            ("inclusionai/ring-2.6-1t", "recommended"),
+            ("nvidia/nemotron-3-super-120b-a12b", "free"),
+        ]
+
+    def test_live_fetch_bubbles_ring_2_6_into_visible_range(self, monkeypatch):
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                # Ring is listed after the first 8 curated ids in the source order.
+                return (
+                    b'{"data":['
+                    b'{"id":"anthropic/claude-opus-4.8","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]},'
+                    b'{"id":"anthropic/claude-opus-4.6","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]},'
+                    b'{"id":"anthropic/claude-sonnet-4.6","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]},'
+                    b'{"id":"anthropic/claude-haiku-4.5","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]},'
+                    b'{"id":"openai/gpt-5.5","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]},'
+                    b'{"id":"openai/gpt-5.5-pro","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]},'
+                    b'{"id":"openai/gpt-5.4-mini","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]},'
+                    b'{"id":"google/gemini-3.1-pro-preview","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]},'
+                    b'{"id":"tencent/hy3-preview","pricing":{"prompt":"0.000015","completion":"0.000075"},'
+                    b'"supported_parameters":["tools"]},'
+                    b'{"id":"inclusionai/ring-2.6-1t","pricing":{"prompt":"0.000000075","completion":"0.000000625"},'
+                    b'"supported_parameters":["temperature","tools","tool_choice"]}'
+                    b']}'
+                )
+
+        monkeypatch.setattr(
+            _models_mod,
+            "OPENROUTER_MODELS",
+            [
+                ("anthropic/claude-opus-4.8", ""),
+                ("anthropic/claude-opus-4.6", ""),
+                ("anthropic/claude-sonnet-4.6", ""),
+                ("anthropic/claude-haiku-4.5", ""),
+                ("openai/gpt-5.5", ""),
+                ("openai/gpt-5.5-pro", ""),
+                ("openai/gpt-5.4-mini", ""),
+                ("google/gemini-3.1-pro-preview", ""),
+                ("tencent/hy3-preview", ""),
+                ("inclusionai/ring-2.6-1t:free", "free"),
+            ],
+        )
+        monkeypatch.setattr(_models_mod, "_openrouter_catalog_cache", None)
+        with patch("hermes_cli.models.urllib.request.urlopen", return_value=_Resp()):
+            models = fetch_openrouter_models(force_refresh=True)
+
+        ids = [mid for mid, _ in models]
+        assert ids[0] == "anthropic/claude-opus-4.8"
+        assert ids[1] == "inclusionai/ring-2.6-1t"
+        assert ids.index("inclusionai/ring-2.6-1t") < 8
+
     def test_live_fetch_recomputes_free_tags(self, monkeypatch):
         class _Resp:
             def __enter__(self):

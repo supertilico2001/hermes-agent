@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-11T16:41:16Z",
+  "updated_at": "2026-07-01T10:47:55Z",
   "metadata": {
     "source": "hermes-agent repo",
     "docs": "https://hermes-agent.nousresearch.com/docs/reference/model-catalog"
@@ -35,6 +35,10 @@
         {
           "id": "qwen/qwen3.6-plus",
           "description": ""
+        },
+        {
+          "id": "inclusionai/ring-2.6-1t:free",
+          "description": "free"
         },
         {
           "id": "anthropic/claude-haiku-4.5",
@@ -89,8 +93,16 @@
           "description": ""
         },
         {
-          "id": "stepfun/step-3.5-flash",
+          "id": "inclusionai/ring-2.6-1t:free",
+          "description": "free"
+        },
+        {
+          "id": "stepfun/step-3.7-flash",
           "description": ""
+        },
+        {
+          "id": "poolside/laguna-m.1:free",
+          "description": "free"
         },
         {
           "id": "minimax/minimax-m2.7",
@@ -133,7 +145,7 @@
           "description": "free"
         },
         {
-          "id": "inclusionai/ring-2.6-1t:free",
+          "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
           "description": "free"
         }
       ]
